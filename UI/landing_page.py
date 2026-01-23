@@ -14,7 +14,7 @@ with left:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right:
-    st.image("maple_lens.png", width=120)
+    st.image("UI/maple_lens.png", width=120)
     st.markdown("## Reddit AI Search")
     st.caption("Search Reddit. Understand instantly.")
 

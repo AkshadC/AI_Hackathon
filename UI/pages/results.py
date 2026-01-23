@@ -1,67 +1,95 @@
+import os
+import sys
+from pathlib import Path
+
+import requests
 import streamlit as st
-from datetime import datetime
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT))
+
+from results_getter import get_results
 
 st.set_page_config(page_title="Maple Lens • Results", layout="wide")
+
+API_BASE = os.getenv("MAPLELENS_API_BASE", "http://localhost:8000")  # your backend
 
 # ---------- Query ----------
 query = st.session_state.get("query")
 if not query:
     st.warning("No query found. Go back and enter a topic.")
     if st.button("⬅️ Back to search"):
-        st.switch_page("landing_page.py")
+        st.switch_page("UI/landing_page.py")
     st.stop()
 
-# ---------- Mock data ----------
-def mock_gemini_summary(q: str):
-    return [
-        "People are discussing what’s happening, why it matters, and who is impacted.",
-        "Common themes include affordability pressures and policy debates.",
-        "Expect polarized takes: anecdotes vs data-driven arguments.",
-    ]
+def api_post(path: str, payload: dict, timeout: int = 60) -> dict:
+    url = f"{API_BASE}{path}"
+    r = requests.post(url, json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
 
-def mock_reddit_posts(q: str):
-    today = datetime.now().strftime("%Y-%m-%d")
-    return [
-        {
-            "title": f"[Discussion] {q} — what are people seeing in their city?",
-            "meta": f"r/canada • {today} • ↑ 1842 • 💬 963",
-            "snippet": "Users share regional experiences and debate causes and fixes.",
-        },
-        {
-            "title": f"Explainer: key numbers and sources about {q}",
-            "meta": f"r/canada • {today} • ↑ 925 • 💬 311",
-            "snippet": "A data-heavy thread with links and counterarguments.",
-        },
-    ]
+@st.cache_data(show_spinner=False, ttl=3600)
+def get_summary(query: str) -> dict:
+    # returns {"summary": "...", "bullets": [...]}
+    return api_post("/summarize", {"query": query})
 
-summary = mock_gemini_summary(query)
-posts = mock_reddit_posts(query)
+@st.cache_data(show_spinner=False, ttl=3600)
+def get_related(text: str, k: int = 10) -> dict:
+    # returns {"posts": [...]}
+    return api_post("/related_posts", {"text": text, "k": k})
 
 # ---------- Header ----------
 st.title(f"Results for: {query}")
 
-# ✅ back works reliably
 if st.button("⬅️ New search"):
     st.switch_page("landing_page.py")
 
 st.markdown("")
 
+# ---------- Call backend ----------
+with st.spinner("Generating Gemini summary..."):
+    summary_res = get_summary(query)
+
+res = get_results(query)
+
+facts_text = res.get("facts_view", "")
+community_text = res.get("community_view", "")
+
+# ✅ use community summary (best) or fallback to query
+retrieval_text = community_text.strip() or query
+
+with st.spinner("Finding related Reddit threads..."):
+    related_res = get_related(retrieval_text, k=10)
+
+posts = related_res.get("posts", [])
+
 # ---------- Layout ----------
 left, right = st.columns(2, gap="large")
 
 with left:
-    st.subheader("✨ Gemini Summary")
-    st.caption("Placeholder — will be replaced by Gemini API")
+    st.subheader("✨ What the sources say")
+    st.caption("Key facts extracted from URLs / sources")
+
     with st.container(border=True):
-        for bullet in summary:
-            st.write("•", bullet)
+        if facts_text.strip():
+            st.markdown(facts_text)
+        else:
+            # fallback to Gemini summary if facts missing
+            bullets = summary_res.get("bullets", [])
+            if bullets:
+                for b in bullets:
+                    st.write("•", b)
+            else:
+                st.write(summary_res.get("summary", "No facts returned."))
 
 with right:
-    st.subheader("🧵 Related Reddit Threads (r/Canada)")
-    st.caption("Placeholder — will be replaced by Reddit pipeline")
+    st.subheader("💬 Community Takeaways (r/Canada)")
+    st.caption("Reddit sentiment ")
+
     with st.container(border=True):
-        for post in posts:
-            st.markdown(f"**{post['title']}**")
-            st.caption(post["meta"])
-            st.write(post["snippet"])
+        # ✅ show community summary at top
+        if community_text.strip():
+            st.markdown(community_text)
             st.divider()
+        else:
+            st.info("No community summary returned.")
+
