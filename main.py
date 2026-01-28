@@ -268,17 +268,19 @@ def get_two_summaries_for_ui(query: str, result: dict):
 
 
 UUID_PAREN_REGEX = re.compile(
-    r"\s*\([0-9a-fA-F\-]{32,}\)"
+    r"\s*\(\s*[0-9a-fA-F]{16,}[-0-9a-fA-F]*\s*\)"
 )
-
 def remove_comment_ids(text: str) -> str:
     if not text:
         return text
     return UUID_PAREN_REGEX.sub("", text).strip()
 
+def load_query_result(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 def process_query(query):
-
-    result = run_query_pipeline(
+    return load_query_result("/home/thesalad/PycharmProjects/AI_Hackathon/saved_results/information_on_tariffs_in_canada.json")['summaries']
+    """result = run_query_pipeline(
         query=query,
         top_threads_k=10,
         top_comments_per_thread=30,
@@ -291,5 +293,5 @@ def process_query(query):
     return {
             "community_view": community_summary,
             "facts_view": url_facts_summary,
-        }
+        }"""
 

@@ -12,6 +12,7 @@ def call_gemini(prompt: str) -> dict:
     json={"contents": prompt}
 )
     # API may return dict or a string; handle both
+    print(r.text)
     data = r.json()
     if isinstance(data, dict):
         # common cases: {"text": "..."} or {"candidates":[...]} etc.
@@ -78,3 +79,4 @@ def fetch_url_text(url: str, timeout=10, max_chars=8000) -> str:
     except Exception:
         return ""
 
+print(call_gemini('current canada immigration'))
