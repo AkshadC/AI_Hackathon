@@ -1,15 +1,5 @@
-import os
-import gc
-import json
-import re
-import numpy as np
-import pandas as pd
-import torch
-
 from data_processing import process_data
 from save_thread_embeddings import embed_all_threads
-from config import CFG
-
 
 def main():
     process_data()

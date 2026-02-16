@@ -12,11 +12,8 @@ type Emotion =
   | "excited";
 
 type Props = {
-  /** If you want a different default start position */
   defaultPos?: { x: number; y: number };
-  /** Size in px */
   size?: number;
-  /** Optional: give a key to persist multiple robots separately */
   storageKey?: string;
 };
 
@@ -32,11 +29,11 @@ const EMOTION_META: Record<
   Emotion,
   { label: string; mouth: "smile" | "flat" | "o" | "zig" | "tiny"; blush?: boolean }
 > = {
-  neutral: { label: "…", mouth: "flat" },
+  neutral: { label: "...", mouth: "flat" },
   happy: { label: "hiya!", mouth: "smile", blush: true },
   curious: { label: "hmm?", mouth: "tiny" },
   surprised: { label: "oh!", mouth: "o" },
-  thinking: { label: "thinking…", mouth: "flat" },
+  thinking: { label: "thinking...", mouth: "flat" },
   sleepy: { label: "zzz", mouth: "tiny" },
   excited: { label: "!", mouth: "zig", blush: true },
 };
@@ -45,31 +42,23 @@ function pickRandom<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-/**
- * RobotBuddy
- * - Cursor tracking pupils
- * - Emotion state machine based on events + idle timer
- * - Draggable; persists position in localStorage
- */
 export default function RobotBuddy({
   defaultPos,
-  size = 140,
+  size = 180,
   storageKey = "robotBuddyPos:v1",
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Position (draggable)
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
-    // Start in middle of screen by default (client will correct after mount)
     return defaultPos ?? { x: 0, y: 0 };
   });
 
-  // Cursor tracking (pupil offsets)
+  // Pupil offset — circular tracking
   const [pupil, setPupil] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Emotions
   const [emotion, setEmotion] = useState<Emotion>("neutral");
-  const [bubble, setBubble] = useState<string>("…");
+  const [bubble, setBubble] = useState<string>("...");
+  const [showBubble, setShowBubble] = useState(false);
 
   // Drag state
   const dragRef = useRef<{
@@ -79,27 +68,28 @@ export default function RobotBuddy({
     offsetY: number;
   }>({ dragging: false, pointerId: null, offsetX: 0, offsetY: 0 });
 
-  // Activity tracking (for idle/sleepy)
+  // Activity tracking
   const lastActivity = useRef<number>(now());
+  const lastMoveReaction = useRef<number>(0);
   const typingDebounce = useRef<number | null>(null);
   const bubbleTimer = useRef<number | null>(null);
 
   const meta = EMOTION_META[emotion];
 
-  // Helper: set emotion with a “speech bubble” and optional auto-return
   const setMood = (m: Emotion, ttlMs = 1400) => {
     setEmotion(m);
     setBubble(EMOTION_META[m].label);
+    setShowBubble(true);
 
     if (bubbleTimer.current) window.clearTimeout(bubbleTimer.current);
     bubbleTimer.current = window.setTimeout(() => {
-      // Fade back to neutral unless user became idle (handled elsewhere)
       setEmotion((prev) => (prev === "sleepy" ? "sleepy" : "neutral"));
-      setBubble("…");
+      setBubble("...");
+      setShowBubble(false);
     }, ttlMs);
   };
 
-  // Load saved position + center default on mount
+  // Load saved position on mount
   useEffect(() => {
     const readSaved = () => {
       try {
@@ -113,7 +103,6 @@ export default function RobotBuddy({
     const w = window.innerWidth;
     const h = window.innerHeight;
 
-    // If saved exists, use it; otherwise center
     const start =
       saved ??
       defaultPos ?? {
@@ -135,12 +124,21 @@ export default function RobotBuddy({
     } catch {}
   }, [pos, storageKey]);
 
-  // Global activity + idle handling
+  // Global activity + idle + exclamation on move/type
   useEffect(() => {
     const onActivity = () => {
       lastActivity.current = now();
-      // If waking from sleepy
       setEmotion((prev) => (prev === "sleepy" ? "neutral" : prev));
+    };
+
+    const onMouseMove = () => {
+      onActivity();
+      // React with exclamation on fast cursor movement (throttled)
+      const t = now();
+      if (t - lastMoveReaction.current > 3000) {
+        lastMoveReaction.current = t;
+        setMood(pickRandom<Emotion>(["curious", "surprised", "excited"]), 1000);
+      }
     };
 
     const onClick = () => {
@@ -150,31 +148,30 @@ export default function RobotBuddy({
 
     const onKeyDown = () => {
       onActivity();
-      // “curious when user types something”
       if (typingDebounce.current) window.clearTimeout(typingDebounce.current);
       typingDebounce.current = window.setTimeout(() => {
-        setMood(pickRandom<Emotion>(["curious", "thinking"]), 1200);
+        setMood(pickRandom<Emotion>(["curious", "thinking", "excited", "surprised"]), 1200);
       }, 80);
     };
 
     window.addEventListener("pointerdown", onClick);
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("mousemove", onActivity, { passive: true });
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
     window.addEventListener("scroll", onActivity, { passive: true });
 
     const idleTimer = window.setInterval(() => {
       const idleFor = now() - lastActivity.current;
-      // after 10s idle -> sleepy
       if (idleFor > 10000) {
         setEmotion("sleepy");
         setBubble("zzz");
+        setShowBubble(true);
       }
     }, 1000);
 
     return () => {
       window.removeEventListener("pointerdown", onClick);
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("mousemove", onActivity as any);
+      window.removeEventListener("mousemove", onMouseMove as any);
       window.removeEventListener("scroll", onActivity as any);
       window.clearInterval(idleTimer);
       if (typingDebounce.current) window.clearTimeout(typingDebounce.current);
@@ -183,7 +180,7 @@ export default function RobotBuddy({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Cursor tracking: compute pupil offset relative to robot center
+  // Cursor tracking — CIRCULAR pupil movement (not square)
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const el = containerRef.current;
@@ -195,23 +192,19 @@ export default function RobotBuddy({
 
       const dx = e.clientX - cx;
       const dy = e.clientY - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Distance-based scaling (feels way more natural)
-      const max = 8;     // max pupil travel in px (increase if you want)
-      const scale = 80;   // smaller = reacts more aggressively
+      const maxTravel = 10; // max pupil offset in px
+      const sensitivity = 120; // distance at which pupil reaches max
 
-      const nx = clamp((dx / scale) * max, -max, max);
-      const ny = clamp((dy / scale) * max, -max, max);
+      // Normalize to circular boundary
+      const t = Math.min(dist / sensitivity, 1);
+      const angle = Math.atan2(dy, dx);
 
-      setPupil({ x: nx, y: ny });
-
-
-      setPupil({ x: clamp(nx, -max, max), y: clamp(ny, -max, max) });
-
-      // Small chance to look “curious” when hovering around it
-      if (r.left <= e.clientX && e.clientX <= r.right && r.top <= e.clientY && e.clientY <= r.bottom) {
-        if (Math.random() < 0.01) setMood("curious", 900);
-      }
+      setPupil({
+        x: Math.cos(angle) * t * maxTravel,
+        y: Math.sin(angle) * t * maxTravel,
+      });
     };
 
     window.addEventListener("pointermove", onMove, { passive: true });
@@ -223,7 +216,6 @@ export default function RobotBuddy({
     const el = containerRef.current;
     if (!el) return;
 
-    // Prevent dragging from selecting text / causing weirdness
     e.preventDefault();
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
 
@@ -261,12 +253,15 @@ export default function RobotBuddy({
     setMood("happy", 900);
   };
 
-  // Visual tweaks based on emotion
+  // Eyelid for sleepy/thinking
   const eyeLid = useMemo(() => {
-    if (emotion === "sleepy") return 10; // eyelid height
-    if (emotion === "thinking") return 4;
+    if (emotion === "sleepy") return 12;
+    if (emotion === "thinking") return 5;
     return 0;
   }, [emotion]);
+
+  // Bouncy animation on excited/surprised
+  const isAnimating = emotion === "excited" || emotion === "surprised";
 
   return (
     <div
@@ -276,8 +271,9 @@ export default function RobotBuddy({
         left: pos.x,
         top: pos.y,
         width: size,
-        height: size,
+        height: size + 20, // extra space for speech bubble
         touchAction: "none",
+        cursor: "grab",
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -286,92 +282,253 @@ export default function RobotBuddy({
       aria-label="Robot buddy"
       title="Drag me!"
     >
-      {/* speech bubble */}
-      <div className="absolute -top-10 left-1/2 -translate-x-1/2">
-        <div className="relative rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-neutral-800 shadow-md backdrop-blur">
+      {/* Speech bubble */}
+      <div
+        className="absolute left-1/2 -translate-x-1/2 transition-all duration-300"
+        style={{
+          top: -36,
+          opacity: showBubble ? 1 : 0,
+          transform: `translateX(-50%) scale(${showBubble ? 1 : 0.7})`,
+        }}
+      >
+        <div className="relative rounded-full bg-white/95 px-4 py-1.5 text-xs font-bold text-neutral-800 shadow-lg backdrop-blur whitespace-nowrap">
           {bubble}
-          <div className="absolute left-1/2 top-full -translate-x-1/2 border-8 border-transparent border-t-white/90" />
+          <div className="absolute left-1/2 top-full -translate-x-1/2 border-[6px] border-transparent border-t-white/95" />
         </div>
       </div>
 
-      {/* body */}
-      <div className="relative h-full w-full">
-        {/* antenna */}
-        <div className="absolute left-1/2 top-2 -translate-x-1/2">
-          <div className="h-6 w-1 rounded-full bg-neutral-200/90 shadow-sm" />
-          <div className="mx-auto -mt-1 h-3 w-3 rounded-full bg-white shadow-md ring-2 ring-neutral-200" />
+      {/* Robot body — ROUND */}
+      <div
+        className="relative"
+        style={{
+          width: size,
+          height: size,
+          transition: "transform 0.2s ease",
+          transform: isAnimating ? "scale(1.08)" : "scale(1)",
+        }}
+      >
+        {/* Antenna */}
+        <div className="absolute left-1/2 -translate-x-1/2" style={{ top: -2 }}>
+          <div
+            className="mx-auto rounded-full bg-neutral-300"
+            style={{ width: 3, height: 18 }}
+          />
+          <div
+            className="mx-auto -mt-1 rounded-full shadow-md ring-2 ring-white"
+            style={{
+              width: 12,
+              height: 12,
+              background: emotion === "excited" || emotion === "surprised"
+                ? "#f87171"
+                : emotion === "happy"
+                ? "#fbbf24"
+                : "#d4d4d4",
+              transition: "background 0.3s ease",
+            }}
+          />
         </div>
 
-        {/* head */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="relative h-[78%] w-[78%] rounded-[28px] bg-white shadow-lg ring-1 ring-neutral-200">
-            {/* top highlight */}
-            <div className="absolute left-3 right-3 top-3 h-3 rounded-full bg-neutral-100" />
+        {/* Head — fully round */}
+        <div
+          className="absolute rounded-full bg-white shadow-xl ring-2 ring-neutral-100 overflow-hidden"
+          style={{
+            top: size * 0.1,
+            left: size * 0.08,
+            width: size * 0.84,
+            height: size * 0.84,
+          }}
+        >
+          {/* Top gloss */}
+          <div
+            className="absolute rounded-full bg-gradient-to-b from-white/80 to-transparent"
+            style={{
+              top: 4,
+              left: "15%",
+              width: "70%",
+              height: "30%",
+            }}
+          />
 
-          {/* eyes (dots only) */}
-          <div className="absolute left-0 right-0 top-[38%] flex items-center justify-center gap-10">
-            {/* left dot */}
-            <div className="relative h-3 w-3">
+          {/* Eyes container */}
+          <div
+            className="absolute left-0 right-0 flex items-center justify-center"
+            style={{ top: "30%", gap: size * 0.2 }}
+          >
+            {/* Left eye */}
+            <div
+              className="relative rounded-full bg-neutral-100"
+              style={{ width: size * 0.2, height: size * 0.2 }}
+            >
+              {/* Pupil */}
               <div
-                className="absolute left-1/2 top-1/2 h-3 w-3 rounded-full bg-neutral-900"
+                className="absolute rounded-full bg-neutral-900"
                 style={{
+                  width: size * 0.1,
+                  height: size * 0.1,
+                  left: "50%",
+                  top: "50%",
                   transform: `translate(-50%, -50%) translate(${pupil.x}px, ${pupil.y}px)`,
+                  transition: "transform 0.08s ease-out",
                 }}
               />
+              {/* Pupil shine */}
+              <div
+                className="absolute rounded-full bg-white"
+                style={{
+                  width: size * 0.035,
+                  height: size * 0.035,
+                  left: `calc(50% + ${pupil.x * 0.6 + 3}px)`,
+                  top: `calc(50% + ${pupil.y * 0.6 - 3}px)`,
+                  transform: "translate(-50%, -50%)",
+                  transition: "left 0.08s ease-out, top 0.08s ease-out",
+                }}
+              />
+              {/* Eyelid (sleepy/thinking) */}
+              {eyeLid > 0 && (
+                <div
+                  className="absolute top-0 left-0 right-0 rounded-t-full bg-white z-10"
+                  style={{
+                    height: `${eyeLid * (100 / (size * 0.2))}%`,
+                    maxHeight: "70%",
+                    transition: "height 0.3s ease",
+                  }}
+                />
+              )}
             </div>
 
-            {/* right dot */}
-            <div className="relative h-3 w-3">
+            {/* Right eye */}
+            <div
+              className="relative rounded-full bg-neutral-100"
+              style={{ width: size * 0.2, height: size * 0.2 }}
+            >
               <div
-                className="absolute left-1/2 top-1/2 h-3 w-3 rounded-full bg-neutral-900"
+                className="absolute rounded-full bg-neutral-900"
                 style={{
+                  width: size * 0.1,
+                  height: size * 0.1,
+                  left: "50%",
+                  top: "50%",
                   transform: `translate(-50%, -50%) translate(${pupil.x}px, ${pupil.y}px)`,
+                  transition: "transform 0.08s ease-out",
                 }}
               />
+              <div
+                className="absolute rounded-full bg-white"
+                style={{
+                  width: size * 0.035,
+                  height: size * 0.035,
+                  left: `calc(50% + ${pupil.x * 0.6 + 3}px)`,
+                  top: `calc(50% + ${pupil.y * 0.6 - 3}px)`,
+                  transform: "translate(-50%, -50%)",
+                  transition: "left 0.08s ease-out, top 0.08s ease-out",
+                }}
+              />
+              {eyeLid > 0 && (
+                <div
+                  className="absolute top-0 left-0 right-0 rounded-t-full bg-white z-10"
+                  style={{
+                    height: `${eyeLid * (100 / (size * 0.2))}%`,
+                    maxHeight: "70%",
+                    transition: "height 0.3s ease",
+                  }}
+                />
+              )}
             </div>
           </div>
 
-            {/* blush */}
-            {meta.blush && (
-              <>
-                <div className="absolute left-5 top-[54%] h-3 w-6 rounded-full bg-rose-200/70 blur-[0.2px]" />
-                <div className="absolute right-5 top-[54%] h-3 w-6 rounded-full bg-rose-200/70 blur-[0.2px]" />
-              </>
+          {/* Blush */}
+          {meta.blush && (
+            <>
+              <div
+                className="absolute rounded-full bg-rose-300/50 blur-[2px]"
+                style={{
+                  width: size * 0.14,
+                  height: size * 0.06,
+                  left: "12%",
+                  top: "58%",
+                  transition: "opacity 0.3s ease",
+                }}
+              />
+              <div
+                className="absolute rounded-full bg-rose-300/50 blur-[2px]"
+                style={{
+                  width: size * 0.14,
+                  height: size * 0.06,
+                  right: "12%",
+                  top: "58%",
+                  transition: "opacity 0.3s ease",
+                }}
+              />
+            </>
+          )}
+
+          {/* Mouth */}
+          <div
+            className="absolute left-0 right-0 flex justify-center"
+            style={{ top: "66%" }}
+          >
+            {meta.mouth === "flat" && (
+              <div
+                className="rounded-full bg-neutral-700"
+                style={{ width: size * 0.16, height: 3 }}
+              />
             )}
-
-            {/* mouth */}
-            <div className="absolute left-0 right-0 top-[62%] flex justify-center">
-              {meta.mouth === "flat" && (
-                <div className="h-1 w-10 rounded-full bg-neutral-800/80" />
-              )}
-              {meta.mouth === "smile" && (
-                <div className="h-6 w-12 rounded-b-full border-b-4 border-neutral-800/80" />
-              )}
-              {meta.mouth === "o" && (
-                <div className="h-6 w-6 rounded-full border-4 border-neutral-800/80" />
-              )}
-              {meta.mouth === "zig" && (
-                <svg width="44" height="14" viewBox="0 0 44 14" className="opacity-90">
-                  <path
-                    d="M2 7 L10 2 L18 12 L26 2 L34 12 L42 7"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="text-neutral-800"
-                  />
-                </svg>
-              )}
-              {meta.mouth === "tiny" && (
-                <div className="h-1 w-6 rounded-full bg-neutral-800/70" />
-              )}
-            </div>
+            {meta.mouth === "smile" && (
+              <svg
+                width={size * 0.22}
+                height={size * 0.12}
+                viewBox="0 0 40 20"
+              >
+                <path
+                  d="M4 6 Q20 22 36 6"
+                  stroke="#404040"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+            {meta.mouth === "o" && (
+              <div
+                className="rounded-full border-[3px] border-neutral-700"
+                style={{ width: size * 0.1, height: size * 0.1 }}
+              />
+            )}
+            {meta.mouth === "zig" && (
+              <svg
+                width={size * 0.26}
+                height={size * 0.1}
+                viewBox="0 0 44 14"
+              >
+                <path
+                  d="M2 7 L10 2 L18 12 L26 2 L34 12 L42 7"
+                  stroke="#404040"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+            {meta.mouth === "tiny" && (
+              <div
+                className="rounded-full bg-neutral-600"
+                style={{ width: size * 0.1, height: 2.5 }}
+              />
+            )}
           </div>
         </div>
 
-        {/* subtle shadow base */}
-        <div className="absolute bottom-2 left-1/2 h-3 w-[70%] -translate-x-1/2 rounded-full bg-black/10 blur-sm" />
+        {/* Shadow underneath */}
+        <div
+          className="absolute rounded-full bg-black/10 blur-md"
+          style={{
+            bottom: 0,
+            left: "20%",
+            width: "60%",
+            height: 8,
+          }}
+        />
       </div>
     </div>
   );

@@ -20,12 +20,10 @@
 }
 
 body {
-  background: var(--background);
-
   font-family: Arial, Helvetica, sans-serif;
   min-height: 100vh;
-  background: #FCB829;
-
+  background: linear-gradient(135deg, #F7A830 0%, #E8853A 100%);
+  background-attachment: fixed;
 }
 /* Minimal scrollbar */
 html {
@@ -48,11 +46,11 @@ html {
   background: transparent;
 }
 .chat-scroll::-webkit-scrollbar-thumb {
-  background: rgba(47, 133, 90, 0.55);
+  background: rgba(196, 93, 26, 0.55);
   border-radius: 999px;
 }
 .chat-scroll:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(47, 133, 90, 0.85);
+  background: rgba(196, 93, 26, 0.85);
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -63,12 +61,12 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(47, 133, 90, 0.5); /* soft green */
+  background-color: rgba(196, 93, 26, 0.5);
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(47, 133, 90, 0.8);
+  background-color: rgba(196, 93, 26, 0.8);
 }
 
 /* Firefox */

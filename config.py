@@ -58,6 +58,14 @@ class Trending:
 
 
 @dataclass(frozen=True)
+class Query:
+    top_k_threads: int = 5
+    top_k_comments_per_thread: int = 5
+    cosine_chunk_size: int = 4096
+    dedup_threshold: float = 0.92
+
+
+@dataclass(frozen=True)
 class Gemini:
     api_key_env: str = "GEMINI_API_KEY"
     # choose one:
@@ -71,6 +79,7 @@ class Config:
     paths: Paths = Paths()
     embedding: Embedding = Embedding()
     trending: Trending = Trending()
+    query: Query = Query()
     gemini: Gemini = Gemini()
 
 
