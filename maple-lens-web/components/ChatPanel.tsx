@@ -9,7 +9,12 @@ type ChatMessage = {
   threads?: ThreadData[];
 };
 
-export default function ChatPanel() {
+type ChatPanelProps = {
+  onQueryResult?: (threads: ThreadData[]) => void;
+  onQueryLoading?: (loading: boolean) => void;
+};
+
+export default function ChatPanel({ onQueryResult, onQueryLoading }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [msg, setMsg] = useState("");
   const [chat, setChat] = useState<ChatMessage[]>([
@@ -23,6 +28,7 @@ export default function ChatPanel() {
     setChat((c) => [...c, { role: "user", text: t }]);
     setMsg("");
     setLoading(true);
+    onQueryLoading?.(true);
 
     try {
       const res = await fetch("http://localhost:8000/analyze", {
@@ -42,6 +48,8 @@ export default function ChatPanel() {
             threads: data.threads ?? [],
           },
         ]);
+        // Push threads to the left panel
+        onQueryResult?.(data.threads ?? []);
       } else {
         setChat((c) => [
           ...c,
@@ -55,6 +63,7 @@ export default function ChatPanel() {
       ]);
     } finally {
       setLoading(false);
+      onQueryLoading?.(false);
     }
   }
 

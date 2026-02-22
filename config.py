@@ -72,6 +72,8 @@ class Gemini:
     model_name: str = "gemini-3-flash"  # or "gemma-3-2b"
     max_retries: int = 6
     max_chars_per_topic_context: int = 2500
+    # set MOCK_GEMINI=1 to skip API calls during local testing
+    mock: bool = os.getenv("MOCK_GEMINI", "0") == "1"
 
 
 @dataclass(frozen=True)

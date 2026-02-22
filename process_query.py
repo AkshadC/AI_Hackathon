@@ -119,6 +119,12 @@ def build_query_context(query: str, matched_threads: pd.DataFrame, top_comments:
 
 
 def call_gemini_for_query(context: str) -> str:
+    if CFG.gemini.mock:
+        # Return a placeholder summary built from the context
+        lines = [l.strip() for l in context.split("\n") if l.strip() and not l.startswith("USER QUERY")]
+        snippet = " ".join(lines[:3])[:200]
+        return f"[Mock summary] Based on the matched threads: {snippet}..."
+
     prompt = f"""You are Maple Lens, an AI assistant that summarizes Reddit discussions from r/Canada.
 
 Based on the following Reddit threads and comments, provide a helpful, conversational summary that answers the user's query.

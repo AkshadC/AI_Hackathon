@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ThreadCard, { type ThreadData } from "./ThreadCard";
+import TopicCharts from "./TopicCharts";
 
 type TopicThread = {
   thread_id: string;
@@ -8,7 +10,11 @@ type TopicThread = {
   url: string;
   score: number | null;
   num_comments: number | null;
+  created_utc: string;
 };
+
+type SentimentDist = { positive: number; neutral: number; negative: number };
+type TimelinePoint = { date: string; count: number };
 
 type Topic = {
   topic_id: number;
@@ -16,17 +22,45 @@ type Topic = {
   summary: string;
   topic_trend_score: number;
   threads: TopicThread[];
+  sentiment_dist: SentimentDist;
+  comment_timeline: TimelinePoint[];
+  total_comments: number;
+  last_updated: string | null;
 };
 
-export default function MainFeed() {
+function relativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  return `${diffDays}d ago`;
+}
+
+type MainFeedProps = {
+  queryThreads?: ThreadData[];
+  queryLoading?: boolean;
+};
+
+export default function MainFeed({ queryThreads = [], queryLoading = false }: MainFeedProps) {
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [overallTimeline, setOverallTimeline] = useState<TimelinePoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("http://localhost:8000/topics")
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) setTopics(data);
+        if (data.topics && Array.isArray(data.topics)) {
+          setTopics(data.topics);
+          setOverallTimeline(data.overall_timeline || []);
+        } else if (Array.isArray(data)) {
+          // backwards compat with old format
+          setTopics(data);
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -54,6 +88,24 @@ export default function MainFeed() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 rounded-2xl bg-gradient-to-b to-transparent" />
 
         <div className="relative flex-1 overflow-y-auto px-3 space-y-3">
+          {/* Query results section */}
+          {queryLoading && (
+            <div className="text-center text-gray-500 py-4 animate-pulse text-sm">
+              Searching threads...
+            </div>
+          )}
+
+          {queryThreads.length > 0 && (
+            <div className="space-y-2 pb-3 border-b border-white/30">
+              <div className="text-sm font-semibold text-[#C45D1A]">
+                Search Results ({queryThreads.length} threads)
+              </div>
+              {queryThreads.map((thread) => (
+                <ThreadCard key={thread.thread_id} thread={thread} />
+              ))}
+            </div>
+          )}
+
           {loading && (
             <div className="text-center text-gray-500 py-8 animate-pulse">
               Loading topics...
@@ -66,6 +118,12 @@ export default function MainFeed() {
             </div>
           )}
 
+          {/* Charts section */}
+          {!loading && topics.length > 0 && (
+            <TopicCharts topics={topics} overallTimeline={overallTimeline} />
+          )}
+
+          {/* Topic cards */}
           {topics.map((topic) => (
             <div
               key={topic.topic_id}
@@ -78,8 +136,22 @@ export default function MainFeed() {
               <div className="text-sm text-gray-700">
                 {topic.summary}
               </div>
-              <div className="text-xs text-gray-500">
-                {topic.threads.length} thread{topic.threads.length !== 1 ? "s" : ""}
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span>
+                  {topic.threads.length} thread{topic.threads.length !== 1 ? "s" : ""}
+                </span>
+                {topic.total_comments > 0 && (
+                  <>
+                    <span>|</span>
+                    <span>{topic.total_comments} comments</span>
+                  </>
+                )}
+                {topic.last_updated && (
+                  <>
+                    <span>|</span>
+                    <span>Updated {relativeTime(topic.last_updated)}</span>
+                  </>
+                )}
               </div>
 
               {/* Thread links */}
@@ -98,6 +170,16 @@ export default function MainFeed() {
                       {t.score != null && (
                         <span className="ml-2 text-gray-400">
                           {t.score} pts
+                        </span>
+                      )}
+                      {t.num_comments != null && (
+                        <span className="ml-2 text-gray-400">
+                          {t.num_comments} comments
+                        </span>
+                      )}
+                      {t.created_utc && (
+                        <span className="ml-2 text-gray-400">
+                          {relativeTime(t.created_utc)}
                         </span>
                       )}
                     </a>

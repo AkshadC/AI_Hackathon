@@ -90,7 +90,22 @@ def analyze(query: Query):
 @app.get("/topics")
 def get_topics():
     path = CFG.paths.homepage_json
-    if path.exists():
-        with open(path) as f:
-            return json.load(f)
-    return []
+    if not path.exists():
+        return {"topics": [], "overall_timeline": []}
+
+    with open(path) as f:
+        topics = json.load(f)
+
+    # Build overall_timeline: aggregate daily comment counts across all topics
+    from collections import defaultdict
+    daily_counts: dict[str, int] = defaultdict(int)
+    for topic in topics:
+        for point in topic.get("comment_timeline", []):
+            daily_counts[point["date"]] += point["count"]
+
+    overall_timeline = sorted(
+        [{"date": d, "count": c} for d, c in daily_counts.items()],
+        key=lambda x: x["date"],
+    )
+
+    return {"topics": topics, "overall_timeline": overall_timeline}

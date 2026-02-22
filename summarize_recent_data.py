@@ -3,6 +3,7 @@ import os
 import re
 import time
 import random
+from collections import Counter
 from typing import Tuple, List, Dict
 
 import numpy as np
@@ -11,8 +12,19 @@ import umap
 import hdbscan
 from google import genai
 from google.genai.errors import ServerError
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from config import CFG
+
+_vader = SentimentIntensityAnalyzer()
+
+
+def _sentiment_bucket(score: float) -> str:
+    if score >= 0.05:
+        return "positive"
+    elif score <= -0.05:
+        return "negative"
+    return "neutral"
 
 
 pd.set_option("display.max_colwidth", None)
@@ -291,6 +303,14 @@ def build_topic_context(topic_df: pd.DataFrame, max_threads: int = 5) -> str:
 
 
 def gemini_summarize_topic(topic_id: int, topic_context: str) -> dict:
+    if CFG.gemini.mock:
+        # Extract a rough headline from the first line of context
+        first_line = topic_context.split("\n")[0][:60].strip("- ").strip()
+        return {
+            "headline": first_line[:40] if first_line else f"Topic {topic_id}",
+            "summary": f"Mock summary for topic {topic_id} (MOCK_GEMINI=1).",
+        }
+
     prompt = f"""
 Return STRICT JSON only:
 {{"headline":"...","summary":"..."}}
@@ -356,12 +376,52 @@ def get_latest_threads_per_topic(df_full: pd.DataFrame, topic_ids: List[int], k:
     )
 
 
-def build_topic_cards(top_topics_df: pd.DataFrame, top_threads_df: pd.DataFrame) -> List[dict]:
+def build_topic_cards(
+    top_topics_df: pd.DataFrame,
+    top_threads_df: pd.DataFrame,
+    comments_df: pd.DataFrame | None = None,
+) -> List[dict]:
     cards = []
     for _, trow in top_topics_df.iterrows():
         tid = int(trow["topic_id"])
 
         threads = top_threads_df[top_threads_df["topic_id"] == tid]
+        thread_ids_in_topic = threads["thread_id"].astype(str).tolist()
+
+        # --- per-topic enrichment from comments ---
+        sentiment_dist = {"positive": 0, "neutral": 0, "negative": 0}
+        comment_timeline: list[dict] = []
+        total_comments = 0
+        last_updated: str | None = None
+
+        if comments_df is not None and not comments_df.empty:
+            topic_coms = comments_df[comments_df["thread_id"].astype(str).isin(thread_ids_in_topic)].copy()
+            total_comments = len(topic_coms)
+
+            if not topic_coms.empty:
+                # sentiment distribution
+                sentiments = topic_coms["body"].fillna("").apply(
+                    lambda t: _vader.polarity_scores(t)["compound"]
+                )
+                buckets = Counter(_sentiment_bucket(s) for s in sentiments)
+                sentiment_dist = {
+                    "positive": buckets.get("positive", 0),
+                    "neutral": buckets.get("neutral", 0),
+                    "negative": buckets.get("negative", 0),
+                }
+
+                # comment timeline (daily counts)
+                if "created_utc" in topic_coms.columns:
+                    coms_dated = topic_coms.dropna(subset=["created_utc"]).copy()
+                    if not coms_dated.empty:
+                        coms_dated["date"] = coms_dated["created_utc"].dt.strftime("%Y-%m-%d")
+                        daily = coms_dated.groupby("date").size().reset_index(name="count")
+                        daily = daily.sort_values("date")
+                        comment_timeline = daily.to_dict(orient="records")
+
+                        # last_updated = most recent comment timestamp
+                        last_updated = str(topic_coms["created_utc"].max())
+
         thread_items = []
         for _, r in threads.iterrows():
             thread_items.append({
@@ -379,6 +439,10 @@ def build_topic_cards(top_topics_df: pd.DataFrame, top_threads_df: pd.DataFrame)
             "summary": str(trow.get("summary", "")),
             "topic_trend_score": float(trow.get("topic_trend_score", 0.0)),
             "threads": thread_items,
+            "sentiment_dist": sentiment_dist,
+            "comment_timeline": comment_timeline,
+            "total_comments": total_comments,
+            "last_updated": last_updated,
         })
     return cards
 
@@ -420,8 +484,10 @@ def main():
     topic_ids = top_topics_df["topic_id"].tolist()
     top_threads = get_latest_threads_per_topic(df_full, topic_ids, k=CFG.trending.top_threads_per_topic)
 
-    # Build cards + save to homepage JSON
-    cards = build_topic_cards(top_topics_df, top_threads)
+    # Build cards + save to homepage JSON (pass comments_df for enrichment)
+    comments_df["created_utc"] = pd.to_datetime(comments_df["created_utc"], utc=True, errors="coerce")
+    comments_df["thread_id"] = comments_df["thread_id"].astype(str)
+    cards = build_topic_cards(top_topics_df, top_threads, comments_df)
 
     with open(CFG.paths.homepage_json, "w") as f:
         json.dump(cards, f, indent=2)
